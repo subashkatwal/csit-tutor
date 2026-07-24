@@ -1,0 +1,15 @@
+langchain-groq
+langchain-core
+python-dotenv
+langchain_community
+langchain_google_genai
+fastapi
+uvicorn
+fastapi
+sqlalchemy
+passlib[bcrypt]==1.7.4
+bcrypt==4.1.3
+python-jose[cryptography]
+python-multipart
+pydantic[email]
+psycopg2-binary
