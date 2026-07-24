@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Study Solver</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: "Inter", sans-serif;
+  background: #fff;
+  color: #1a1a1a;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 28px;
+  border-bottom: 1px solid #ebebeb;
+  flex-shrink: 0;
+}
+
+.brand { font-size: 16px; font-weight: 600; color: #1a1a1a; }
+.brand-sub { font-size: 12px; color: #9ca3af; font-weight: 400; margin-top: 1px; }
+
+.quota-pill {
+  font-size: 12px;
+  color: #6b7280;
+  border: 1px solid #e5e7eb;
+  border-radius: 20px;
+  padding: 5px 14px;
+}
+
+.chat-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 0 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 40px 24px;
+  text-align: center;
+}
+
+.empty-state h2 {
+  font-size: 26px;
+  font-weight: 600;
+  color: #111;
+}
+
+.empty-state p {
+  font-size: 14px;
+  color: #6b7280;
+  max-width: 380px;
+  line-height: 1.6;
+}
+
+.messages { display: flex; flex-direction: column; gap: 0; }
+
+.msg-row {
+  padding: 20px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.msg-row:last-child { border-bottom: none; }
+
+.msg-inner {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 28px;
+}
+
+.msg-user .msg-inner {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.bubble-user {
+  background: #f3f4f6;
+  border-radius: 18px 18px 4px 18px;
+  padding: 12px 18px;
+  font-size: 14px;
+  line-height: 1.6;
+  max-width: 80%;
+  color: #111;
+}
+
+.msg-ai .msg-inner { display: flex; flex-direction: column; gap: 16px; }
+
+.thinking-bubble {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+}
+
+.thinking-label {
+  font-size: 12px;
+  color: #9ca3af;
+  font-style: italic;
+}
+
+.dots {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  background: #d1d5db;
+  border-radius: 50%;
+  animation: bounce 1.2s infinite ease-in-out;
+}
+
+.dot:nth-child(2) { animation-delay: 0.2s; }
+.dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes bounce {
+  0%, 80%, 100% { transform: translateY(0); background: #d1d5db; }
+  40% { transform: translateY(-6px); background: #9ca3af; }
+}
+
+.section-block { display: flex; flex-direction: column; gap: 8px; }
+
+.section-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: #9ca3af;
+}
+
+.detection-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.chip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 8px 14px;
+}
+
+.chip-label { font-size: 10px; color: #9ca3af; text-transform: uppercase; letter-spacing: .07em; }
+.chip-value { font-size: 13px; font-weight: 500; color: #111; }
+
+.solution-box {
+  background: #fafafa;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 18px 20px;
+  font-size: 13.5px;
+  line-height: 1.85;
+  white-space: pre-wrap;
+  color: #374151;
+}
+
+.final-answer-line {
+  margin-top: 14px;
+  padding: 10px 15px;
+  background: #eff6ff;
+  border-left: 3px solid #3b82f6;
+  border-radius: 0 8px 8px 0;
+  font-weight: 600;
+  color: #1d4ed8;
+  font-size: 13.5px;
+}
+
+.exam-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.exam-cell {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #fafafa;
+}
+
+.exam-cell .ec-label { font-size: 10px; color: #9ca3af; text-transform: uppercase; letter-spacing: .07em; margin-bottom: 5px; }
+.exam-cell .ec-val { font-size: 14px; font-weight: 500; color: #111; }
+.yes { color: #16a34a; }
+.no  { color: #dc2626; }
+
+.tip-card {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 10px;
+  padding: 12px 15px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #92400e;
+  grid-column: 1 / -1;
+}
+
+.tip-card strong { display: block; font-size: 10px; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 4px; color: #b45309; }
+
+.practice-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 16px 18px;
+  background: #fafafa;
+}
+
+.practice-card + .practice-card { margin-top: 10px; }
+
+.prob-num { font-size: 10px; font-weight: 600; color: #6366f1; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 8px; }
+.prob-text { font-size: 13.5px; line-height: 1.65; color: #374151; margin-bottom: 10px; }
+
+.prob-ans {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  color: #166534;
+}
+
+.ans-label { font-size: 9px; color: #4ade80; text-transform: uppercase; letter-spacing: .07em; margin-bottom: 3px; font-weight: 600; }
+
+.input-wrap {
+  flex-shrink: 0;
+  padding: 16px 28px 20px;
+  border-top: 1px solid #ebebeb;
+  background: #fff;
+}
+
+.input-box-outer {
+  max-width: 720px;
+  margin: 0 auto;
+  border: 1px solid #d1d5db;
+  border-radius: 14px;
+  background: #fff;
+  transition: border-color .2s;
+}
+
+.input-box-outer:focus-within { border-color: #9ca3af; }
+
+textarea {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 14px 16px 4px;
+  font-family: "Inter", sans-serif;
+  font-size: 14px;
+  color: #111;
+  resize: none;
+  min-height: 52px;
+  max-height: 180px;
+  line-height: 1.5;
+}
+
+textarea::placeholder { color: #9ca3af; }
+
+.input-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px 10px;
+}
+
+.input-hint { font-size: 11px; color: #9ca3af; }
+
+.toolbar-right { display: flex; align-items: center; gap: 10px; }
+
+.tool-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #9ca3af;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color .15s, background .15s;
+}
+
+.tool-btn:hover { color: #374151; background: #f3f4f6; }
+
+.tool-btn svg { width: 17px; height: 17px; }
+
+.send-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: #1a1a1a;
+  border: none;
+  cursor: pointer;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .15s;
+  flex-shrink: 0;
+}
+
+.send-btn:hover { background: #374151; }
+.send-btn:disabled { background: #e5e7eb; color: #9ca3af; cursor: not-allowed; }
+.send-btn svg { width: 16px; height: 16px; }
+
+.fade-in { animation: fadeIn .3s ease both; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="brand">Study Solver</div>
+    <div class="brand-sub">AI tutor · subject detect → solve → exam pattern → practice</div>
+  </div>
+  <div class="quota-pill">CSIT 4th Sem · TU Nepal</div>
+</header>
+
+<div class="chat-area" id="chatArea">
+  <div class="empty-state" id="emptyState">
+    <h2>Ask Five question</h2>
+    <p>Paste a question from DBMS, Theory of Computation,  Computer Network,Operating System,Artificial Intelligence. You'll get a full solution, exam relevance, and two practice problems.</p>
+  </div>
+  <div class="messages" id="messages"></div>
+</div>
+
+<div class="input-wrap">
+  <div class="input-box-outer">
+    <textarea id="input" placeholder="Type your problem..." rows="1"></textarea>
+    <div class="input-toolbar">
+      <span class="input-hint">Press Enter to send · Shift+Enter for newline</span>
+      <div class="toolbar-right">
+        <input id="fileInput" type="file" accept="image/*,.txt,.md,.pdf" hidden />
+        <button class="tool-btn" id="scanBtn" title="Attach question file">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="7" y="7" width="10" height="10" rx="1"/></svg>
+        </button>
+        <button class="tool-btn" id="sampleBtn" title="Add sample question">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7V5h16v2M9 5v14M15 5v14M9 12h6"/></svg>
+        </button>
+        <button class="tool-btn" id="polishBtn" title="Polish selected text">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        </button>
+        <button class="tool-btn" id="noteBtn" title="Ask for exam notes">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </button>
+        <button class="send-btn" id="sendBtn" onclick="send()" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const input = document.getElementById("input");
+const sendBtn = document.getElementById("sendBtn");
+const messages = document.getElementById("messages");
+const emptyState = document.getElementById("emptyState");
+const chatArea = document.getElementById("chatArea");
+
+input.addEventListener("input", () => {
+  sendBtn.disabled = !input.value.trim();
+  input.style.height = "auto";
+  input.style.height = Math.min(input.scrollHeight, 180) + "px";
+});
+
+input.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    if (!sendBtn.disabled) send();
+  }
+});
+
+function addRow(cls) {
+  const row = document.createElement("div");
+  row.className = "msg-row " + cls + " fade-in";
+  const inner = document.createElement("div");
+  inner.className = "msg-inner";
+  row.appendChild(inner);
+  messages.appendChild(row);
+  return inner;
+}
+
+function scrollBottom() {
+  chatArea.scrollTop = chatArea.scrollHeight;
+}
+
+async function send() {
+  const problem = input.value.trim();
+  if (!problem) return;
+
+  emptyState.style.display = "none";
+  input.value = "";
+  input.style.height = "auto";
+  sendBtn.disabled = true;
+
+  const userInner = addRow("msg-user");
+  const bubble = document.createElement("div");
+  bubble.className = "bubble-user";
+  bubble.textContent = problem;
+  userInner.appendChild(bubble);
+  scrollBottom();
+
+  const aiInner = addRow("msg-ai");
+
+  const thinkEl = document.createElement("div");
+  thinkEl.className = "thinking-bubble";
+  thinkEl.innerHTML = `<div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div><span class="thinking-label">Thinking...</span>`;
+  aiInner.appendChild(thinkEl);
+  scrollBottom();
+
+  try {
+    const resp = await fetch("/solve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ problem }),
+    });
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const msg = JSON.parse(line.slice(6));
+        handle(msg, thinkEl, aiInner);
+        scrollBottom();
+      }
+    }
+  } catch (e) {
+    thinkEl.innerHTML = `<span style="color:#dc2626;font-size:13px">Error: ${e.message}</span>`;
+  }
+
+  sendBtn.disabled = false;
+}
+
+function handle({ type, data }, thinkEl, aiInner) {
+  if (type === "status") {
+    thinkEl.querySelector(".thinking-label").textContent = data.text;
+    return;
+  }
+
+  if (type === "detection") {
+    thinkEl.remove();
+    const block = document.createElement("div");
+    block.className = "section-block fade-in";
+    block.innerHTML = `
+      <div class="section-label">Question Analysis</div>
+      <div class="detection-chips">
+        <div class="chip"><span class="chip-label">Subject</span><span class="chip-value">${data.subject || "—"}</span></div>
+        <div class="chip"><span class="chip-label">Topic</span><span class="chip-value">${data.topic || "—"}</span></div>
+        <div class="chip"><span class="chip-label">Type</span><span class="chip-value">${data.problem_type || "—"}</span></div>
+        <div class="chip"><span class="chip-label">Difficulty</span><span class="chip-value">${data.difficulty_level || "—"}</span></div>
+      </div>`;
+    aiInner.appendChild(block);
+    const think2 = document.createElement("div");
+    think2.className = "thinking-bubble";
+    think2.innerHTML = `<div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div><span class="thinking-label">Writing solution...</span>`;
+    aiInner.appendChild(think2);
+    aiInner._think = think2;
+    return;
+  }
+
+  if (type === "solution") {
+    if (aiInner._think) { aiInner._think.remove(); delete aiInner._think; }
+    const raw = data.content || "";
+    const highlighted = raw.replace(/(FINAL ANSWER[:\s].+)/gi, '\n<div class="final-answer-line">$1</div>');
+    const block = document.createElement("div");
+    block.className = "section-block fade-in";
+    block.innerHTML = `<div class="section-label">Step-by-Step Solution</div><div class="solution-box">${highlighted}</div>`;
+    aiInner.appendChild(block);
+    const think3 = document.createElement("div");
+    think3.className = "thinking-bubble";
+    think3.innerHTML = `<div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div><span class="thinking-label">Checking exam pattern...</span>`;
+    aiInner.appendChild(think3);
+    aiInner._think = think3;
+    return;
+  }
+
+  if (type === "exam") {
+    if (aiInner._think) { aiInner._think.remove(); delete aiInner._think; }
+    const asked = data.commonly_appears ?? data.commonly_asked;
+    const years = (data.likely_years || data.years_appeared || []).join(", ") || "Unknown";
+    const marks = data.marks ?? data.marks_carried ?? "—";
+    const tip = data.exam_tip || data.tip || "";
+    const block = document.createElement("div");
+    block.className = "section-block fade-in";
+    block.innerHTML = `
+      <div class="section-label">TU Exam Pattern</div>
+      <div class="exam-grid">
+        <div class="exam-cell"><div class="ec-label">Commonly Asked</div><div class="ec-val ${asked ? 'yes' : 'no'}">${asked ? "✔ Yes" : "✘ No"}</div></div>
+        <div class="exam-cell"><div class="ec-label">Marks</div><div class="ec-val">${marks} marks</div></div>
+        <div class="exam-cell" style="grid-column:1/-1"><div class="ec-label">Years Appeared</div><div class="ec-val">${years}</div></div>
+        ${tip ? `<div class="tip-card" style="grid-column:1/-1"><strong>Exam Tip</strong>${tip}</div>` : ""}
+      </div>`;
+    aiInner.appendChild(block);
+    const think4 = document.createElement("div");
+    think4.className = "thinking-bubble";
+    think4.innerHTML = `<div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div><span class="thinking-label">Generating practice problems...</span>`;
+    aiInner.appendChild(think4);
+    aiInner._think = think4;
+    return;
+  }
+
+  if (type === "practice") {
+    if (aiInner._think) { aiInner._think.remove(); delete aiInner._think; }
+    const block = document.createElement("div");
+    block.className = "section-block fade-in";
+    block.innerHTML = `
+      <div class="section-label">Practice Problems</div>
+      <div class="practice-card">
+        <div class="prob-num">Problem 01</div>
+        <div class="prob-text">${data.problem_one || "—"}</div>
+        <div class="prob-ans"><div class="ans-label">Answer</div>${data.answer_one || "—"}</div>
+      </div>
+      <div class="practice-card">
+        <div class="prob-num">Problem 02</div>
+        <div class="prob-text">${data.problem_two || "—"}</div>
+        <div class="prob-ans"><div class="ans-label">Answer</div>${data.answer_two || "—"}</div>
+      </div>`;
+    aiInner.appendChild(block);
+    return;
+  }
+}
+</script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const sampleQuestion = "Explain K-Means clustering algorithm with an example. Also mention its advantages and limitations.";
+
+  function syncInput() {
+    const inputEl = $("input");
+    const sendEl = $("sendBtn");
+    sendEl.disabled = !inputEl.value.trim();
+    inputEl.style.height = "auto";
+    inputEl.style.height = Math.min(inputEl.scrollHeight, 180) + "px";
+  }
+
+  function scrollBottom() {
+    const chatAreaEl = $("chatArea");
+    chatAreaEl.scrollTop = chatAreaEl.scrollHeight;
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function valueOrDash(value) {
+    return escapeHtml(value || "-");
+  }
+
+  function addRow(cls) {
+    const row = document.createElement("div");
+    row.className = "msg-row " + cls + " fade-in";
+    const inner = document.createElement("div");
+    inner.className = "msg-inner";
+    row.appendChild(inner);
+    $("messages").appendChild(row);
+    return inner;
+  }
+
+  function addThinking(aiInner, text) {
+    const think = document.createElement("div");
+    think.className = "thinking-bubble";
+    think.innerHTML = `<div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div><span class="thinking-label">${escapeHtml(text)}</span>`;
+    aiInner.appendChild(think);
+    aiInner._think = think;
+    return think;
+  }
+
+  function removeThinking(aiInner) {
+    if (aiInner._think) {
+      aiInner._think.remove();
+      delete aiInner._think;
+    }
+  }
+
+  $("scanBtn").addEventListener("click", () => $("fileInput").click());
+
+  $("fileInput").addEventListener("change", async () => {
+    const file = $("fileInput").files[0];
+    if (!file) return;
+    const inputEl = $("input");
+
+    if (file.type.startsWith("text/") || file.name.endsWith(".md")) {
+      inputEl.value = await file.text();
+    } else {
+      inputEl.value = `I attached "${file.name}". Please type or paste the question text here so I can solve it.`;
+    }
+    $("fileInput").value = "";
+    inputEl.focus();
+    syncInput();
+  });
+
+  $("sampleBtn").addEventListener("click", () => {
+    $("input").value = sampleQuestion;
+    $("input").focus();
+    syncInput();
+  });
+
+  $("polishBtn").addEventListener("click", () => {
+    const inputEl = $("input");
+    const selected = inputEl.value.slice(inputEl.selectionStart, inputEl.selectionEnd).trim();
+    const base = selected || inputEl.value.trim();
+    inputEl.value = base
+      ? `Rewrite this as a clear TU CSIT exam question, then solve it:\n\n${base}`
+      : "Rewrite this as a clear TU CSIT exam question, then solve it:\n\n";
+    inputEl.focus();
+    syncInput();
+  });
+
+  $("noteBtn").addEventListener("click", () => {
+    const inputEl = $("input");
+    const base = inputEl.value.trim();
+    inputEl.value = base
+      ? `${base}\n\nAlso give short exam notes and likely marks.`
+      : "Give short exam notes, important points, likely marks, and practice questions for: ";
+    inputEl.focus();
+    syncInput();
+  });
+
+  window.send = async function send() {
+    const inputEl = $("input");
+    const sendEl = $("sendBtn");
+    const problem = inputEl.value.trim();
+    if (!problem) return;
+
+    $("emptyState").style.display = "none";
+    inputEl.value = "";
+    inputEl.style.height = "auto";
+    sendEl.disabled = true;
+
+    const userInner = addRow("msg-user");
+    const bubble = document.createElement("div");
+    bubble.className = "bubble-user";
+    bubble.textContent = problem;
+    userInner.appendChild(bubble);
+    scrollBottom();
+
+    const aiInner = addRow("msg-ai");
+    addThinking(aiInner, "Thinking...");
+    scrollBottom();
+
+    try {
+      const resp = await fetch("/solve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ problem }),
+      });
+
+      if (!resp.ok || !resp.body) {
+        const text = await resp.text();
+        throw new Error(text || `Request failed with status ${resp.status}`);
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          window.handle(JSON.parse(line.slice(6)), aiInner);
+          scrollBottom();
+        }
+      }
+    } catch (error) {
+      const target = aiInner._think || addThinking(aiInner, "");
+      target.innerHTML = `<span style="color:#dc2626;font-size:13px">Error: ${escapeHtml(error.message)}</span>`;
+    }
+
+    syncInput();
+  };
+
+  window.handle = function handle(message, aiInner) {
+    const { type, data = {} } = message;
+
+    if (type === "status") {
+      const active = aiInner._think || addThinking(aiInner, "");
+      const label = active.querySelector(".thinking-label");
+      if (label) label.textContent = data.text || "Working...";
+      return;
+    }
+
+    if (type === "error") {
+      const active = aiInner._think || addThinking(aiInner, "");
+      active.innerHTML = `<span style="color:#dc2626;font-size:13px">Error: ${escapeHtml(data.message || "Something went wrong.")}</span>`;
+      return;
+    }
+
+    if (type === "detection") {
+      removeThinking(aiInner);
+      const block = document.createElement("div");
+      block.className = "section-block fade-in";
+      block.innerHTML = `
+        <div class="section-label">Question Analysis</div>
+        <div class="detection-chips">
+          <div class="chip"><span class="chip-label">Subject</span><span class="chip-value">${valueOrDash(data.subject)}</span></div>
+          <div class="chip"><span class="chip-label">Topic</span><span class="chip-value">${valueOrDash(data.topic)}</span></div>
+          <div class="chip"><span class="chip-label">Type</span><span class="chip-value">${valueOrDash(data.problem_type)}</span></div>
+          <div class="chip"><span class="chip-label">Difficulty</span><span class="chip-value">${valueOrDash(data.difficulty_level)}</span></div>
+        </div>`;
+      aiInner.appendChild(block);
+      addThinking(aiInner, "Writing solution...");
+      return;
+    }
+
+    if (type === "solution") {
+      removeThinking(aiInner);
+      const raw = data.content || "";
+      const match = raw.match(/FINAL ANSWER[:\s][\s\S]*$/i);
+      const body = match ? raw.slice(0, match.index).trim() : raw;
+      const finalAnswer = match ? match[0].trim() : "";
+      const block = document.createElement("div");
+      block.className = "section-block fade-in";
+      block.innerHTML = `
+        <div class="section-label">Step-by-Step Solution</div>
+        <div class="solution-box">${escapeHtml(body)}${finalAnswer ? `<div class="final-answer-line">${escapeHtml(finalAnswer)}</div>` : ""}</div>`;
+      aiInner.appendChild(block);
+      addThinking(aiInner, "Checking exam pattern...");
+      return;
+    }
+
+    if (type === "exam") {
+      removeThinking(aiInner);
+      const asked = data.commonly_appears ?? data.commonly_asked;
+      const years = (data.likely_years || data.years_appeared || []).join(", ") || "Unknown";
+      const marks = data.marks ?? data.marks_carried ?? "-";
+      const tip = data.exam_tip || data.tip || "";
+      const block = document.createElement("div");
+      block.className = "section-block fade-in";
+      block.innerHTML = `
+        <div class="section-label">TU Exam Pattern</div>
+        <div class="exam-grid">
+          <div class="exam-cell"><div class="ec-label">Commonly Asked</div><div class="ec-val ${asked ? "yes" : "no"}">${asked ? "Yes" : "No"}</div></div>
+          <div class="exam-cell"><div class="ec-label">Marks</div><div class="ec-val">${escapeHtml(marks)} marks</div></div>
+          <div class="exam-cell" style="grid-column:1/-1"><div class="ec-label">Years Appeared</div><div class="ec-val">${escapeHtml(years)}</div></div>
+          ${tip ? `<div class="tip-card" style="grid-column:1/-1"><strong>Exam Tip</strong>${escapeHtml(tip)}</div>` : ""}
+        </div>`;
+      aiInner.appendChild(block);
+      addThinking(aiInner, "Generating practice problems...");
+      return;
+    }
+
+    if (type === "practice") {
+      removeThinking(aiInner);
+      const block = document.createElement("div");
+      block.className = "section-block fade-in";
+      block.innerHTML = `
+        <div class="section-label">Practice Problems</div>
+        <div class="practice-card">
+          <div class="prob-num">Problem 01</div>
+          <div class="prob-text">${valueOrDash(data.problem_one)}</div>
+          <div class="prob-ans"><div class="ans-label">Answer</div>${valueOrDash(data.answer_one)}</div>
+        </div>
+        <div class="practice-card">
+          <div class="prob-num">Problem 02</div>
+          <div class="prob-text">${valueOrDash(data.problem_two)}</div>
+          <div class="prob-ans"><div class="ans-label">Answer</div>${valueOrDash(data.answer_two)}</div>
+        </div>`;
+      aiInner.appendChild(block);
+      return;
+    }
+
+    if (type === "done") {
+      removeThinking(aiInner);
+    }
+  };
+})();
+</script>
+</body>
+</html>
