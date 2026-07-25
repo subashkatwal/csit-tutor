@@ -53,6 +53,11 @@ pnpm-debug.log*
 *.pid
 postgres_data/
 
+# Local development databases
+*.db
+*.sqlite
+*.sqlite3
+
 
 .vscode/
 !.vscode/extensions.json
