@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -43,8 +43,19 @@ import {
   Layers, BookOpen, Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { store, uid, SEMESTERS, type Chat, type ChatMessage } from "@/lib/store";
-import { mockAiAnswer } from "@/lib/mock-ai";
+import { store, uid } from "@/lib/store";
+import {
+  listConversations,
+  createConversation,
+  getConversation,
+  deleteConversation,
+  sendMessageStream,
+  type ConversationOut,
+  type Detection,
+  type ExamPattern,
+  type PracticeProblems,
+} from "@/api/conversations";
+import { listSemesters, selectSemester, type Semester } from "@/api/semesters";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/chat")({
@@ -68,12 +79,33 @@ const SUGGESTIONS = [
   { title: "Theory of Computation DFA", subject: "TOC" },
 ];
 
-function groupChats(chats: Chat[]) {
+// --- local UI message model (independent of persisted MessageOut, so we can show a live "thinking" bubble) ---
+type UIMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+  thinking?: boolean;
+  detection?: Detection;
+  exam?: ExamPattern;
+  practice?: PracticeProblems;
+};
+
+function parseMeta(meta: MessageMetaRaw): { detection?: Detection; exam?: ExamPattern; practice?: PracticeProblems } {
+  if (!meta) return {};
+  if (typeof meta === "string") {
+    try { return JSON.parse(meta); } catch { return {}; }
+  }
+  return meta;
+}
+type MessageMetaRaw = string | { detection?: Detection; exam?: ExamPattern; practice?: PracticeProblems } | null | undefined;
+
+function groupConversations(list: ConversationOut[]) {
   const now = Date.now();
   const day = 24 * 60 * 60 * 1000;
-  const groups: Record<string, Chat[]> = { Today: [], Yesterday: [], "Previous 7 Days": [], Older: [] };
-  for (const c of chats) {
-    const diff = now - c.updatedAt;
+  const groups: Record<string, ConversationOut[]> = { Today: [], Yesterday: [], "Previous 7 Days": [], Older: [] };
+  for (const c of list) {
+    const diff = now - new Date(c.updated_at).getTime();
     if (diff < day) groups.Today.push(c);
     else if (diff < 2 * day) groups.Yesterday.push(c);
     else if (diff < 7 * day) groups["Previous 7 Days"].push(c);
@@ -84,90 +116,159 @@ function groupChats(chats: Chat[]) {
 
 function ChatPage() {
   const navigate = useNavigate();
-  const [user, setUser] = useState(store.getUser());
-  const [semester, setSemesterState] = useState<number | null>(store.getSemester());
-  const [chats, setChats] = useState<Chat[]>([]);
+  const [user] = useState(store.getUser());
+  const [semesterId, setSemesterId] = useState<string | null>(store.getSemesterId());
+  const [semesterNumber, setSemesterNumber] = useState<number | null>(store.getSemester());
+  const [semesters, setSemesters] = useState<Semester[]>([]);
+
+  const [conversations, setConversations] = useState<ConversationOut[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<UIMessage[]>([]);
+  const [loadingActive, setLoadingActive] = useState(false);
+
   const [collapsed, setCollapsed] = useState(false);
   const [search, setSearch] = useState("");
   const [semModalOpen, setSemModalOpen] = useState(false);
-  const [pendingSem, setPendingSem] = useState<number | null>(null);
+  const [pendingSemId, setPendingSemId] = useState<string | null>(null);
 
+  // --- guards + initial load ---
   useEffect(() => {
     if (!user) { navigate({ to: "/login" }); return; }
-    if (!semester) { navigate({ to: "/onboarding" }); return; }
-    setChats(store.getChats());
-  }, [user, semester, navigate]);
+    if (!semesterId) { navigate({ to: "/onboarding" }); return; }
+    refreshConversations();
+    listSemesters().then(setSemesters).catch(() => {});
+  }, [user, semesterId, navigate]);
 
-  const active = chats.find(c => c.id === activeId) ?? null;
+  const refreshConversations = () => {
+    listConversations()
+      .then((list) => setConversations(list.filter((c) => c.semester_id === semesterId)))
+      .catch(() => toast.error("Couldn't load your chats"));
+  };
+
+  // --- load full message history when switching conversations ---
+  useEffect(() => {
+    if (!activeId) { setMessages([]); return; }
+    setLoadingActive(true);
+    getConversation(activeId)
+      .then((detail) => {
+        setMessages(
+          detail.messages.map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            createdAt: m.created_at,
+            ...parseMeta(m.meta),
+          })),
+        );
+      })
+      .catch(() => toast.error("Couldn't load that conversation"))
+      .finally(() => setLoadingActive(false));
+  }, [activeId]);
+
+  const active = conversations.find((c) => c.id === activeId) ?? null;
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return chats;
+    if (!search.trim()) return conversations;
     const q = search.toLowerCase();
-    return chats.filter(c => c.title.toLowerCase().includes(q) || c.messages.some(m => m.content.toLowerCase().includes(q)));
-  }, [chats, search]);
+    return conversations.filter((c) => c.title.toLowerCase().includes(q));
+  }, [conversations, search]);
 
-  const groups = useMemo(() => groupChats(filtered), [filtered]);
+  const groups = useMemo(() => groupConversations(filtered), [filtered]);
 
-  const persist = (next: Chat[]) => { setChats(next); store.setChats(next); };
+  const newChat = () => { setActiveId(null); setMessages([]); };
 
-  const newChat = () => { setActiveId(null); };
+  const sendMessage = async (text: string) => {
+    if (!text.trim() || !semesterId) return;
 
-  const sendMessage = (text: string) => {
-    if (!text.trim() || !semester) return;
-    let current = active;
-    let list = chats;
-    if (!current) {
-      current = {
-        id: uid(),
-        title: text.slice(0, 48),
-        semester,
-        messages: [],
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      list = [current, ...chats];
+    let conversationId = activeId;
+
+    // create the conversation on first message
+    if (!conversationId) {
+      try {
+        const convo = await createConversation(semesterId, text.slice(0, 48));
+        conversationId = convo.id;
+        setConversations((prev) => [convo, ...prev]);
+        setActiveId(convo.id);
+      } catch {
+        toast.error("Couldn't start a new chat");
+        return;
+      }
     }
-    const userMsg: ChatMessage = { id: uid(), role: "user", content: text, createdAt: Date.now() };
-    const thinking: ChatMessage = { id: uid(), role: "assistant", content: "__thinking__", createdAt: Date.now() };
-    current = { ...current, messages: [...current.messages, userMsg, thinking], updatedAt: Date.now() };
-    list = list.map(c => c.id === current!.id ? current! : c);
-    persist(list);
-    setActiveId(current.id);
 
-    setTimeout(() => {
-      const res = mockAiAnswer(text, semester);
-      const answer: ChatMessage = {
-        id: thinking.id,
-        role: "assistant",
-        content: JSON.stringify({ md: res.answer, sources: res.sources, past: res.pastQuestion }),
-        createdAt: Date.now(),
-      };
-      const updated = list.map(c => c.id === current!.id
-        ? { ...c, messages: c.messages.map(m => m.id === thinking.id ? answer : m), updatedAt: Date.now() }
-        : c
+    const userMsg: UIMessage = { id: uid(), role: "user", content: text, createdAt: new Date().toISOString() };
+    const thinkingId = uid();
+    const thinkingMsg: UIMessage = { id: thinkingId, role: "assistant", content: "", createdAt: new Date().toISOString(), thinking: true };
+    setMessages((prev) => [...prev, userMsg, thinkingMsg]);
+
+    let solutionText = "";
+    let detection: Detection | undefined;
+    let exam: ExamPattern | undefined;
+    let practice: PracticeProblems | undefined;
+
+    try {
+      await sendMessageStream(conversationId, text, {
+        onDetection: (d) => { detection = d; },
+        onSolution: (content) => {
+          solutionText = content;
+          setMessages((prev) =>
+            prev.map((m) => (m.id === thinkingId ? { ...m, content, thinking: true } : m)),
+          );
+        },
+        onExam: (e) => { exam = e; },
+        onPractice: (p) => { practice = p; },
+        onDone: () => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === thinkingId ? { ...m, content: solutionText, thinking: false, detection, exam, practice } : m,
+            ),
+          );
+          refreshConversations(); // picks up updated title/timestamp
+        },
+        onError: (msg) => {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === thinkingId ? { ...m, content: `Sorry, something went wrong: ${msg}`, thinking: false } : m)),
+          );
+        },
+      });
+    } catch {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === thinkingId ? { ...m, content: "Sorry, something went wrong. Please try again.", thinking: false } : m)),
       );
-      persist(updated);
-    }, 1400);
+    }
   };
 
-  const deleteChat = (id: string) => {
-    persist(chats.filter(c => c.id !== id));
-    if (activeId === id) setActiveId(null);
+  const deleteChat = async (id: string) => {
+    try {
+      await deleteConversation(id);
+      setConversations((prev) => prev.filter((c) => c.id !== id));
+      if (activeId === id) newChat();
+    } catch {
+      toast.error("Couldn't delete that chat");
+    }
   };
 
-  const openSemesterModal = () => { setPendingSem(semester); setSemModalOpen(true); };
-  const confirmSemester = () => {
-    if (!pendingSem) return;
-    store.setSemester(pendingSem);
-    setSemesterState(pendingSem);
-    setActiveId(null);
-    setSemModalOpen(false);
-    toast.success(`Switched to Semester ${pendingSem}`);
+  const openSemesterModal = () => { setPendingSemId(semesterId); setSemModalOpen(true); };
+  const confirmSemester = async () => {
+    if (!pendingSemId) return;
+    const semester = semesters.find((s) => s.id === pendingSemId);
+    if (!semester) return;
+    try {
+      await selectSemester(semester.id);
+      store.setSemester(semester.number);
+      store.setSemesterId(semester.id);
+      setSemesterId(semester.id);
+      setSemesterNumber(semester.number);
+      newChat();
+      setSemModalOpen(false);
+      toast.success(`Switched to Semester ${semester.number}`);
+    } catch {
+      toast.error("Couldn't switch semester");
+    }
   };
 
   const logout = () => {
     store.clearUser();
+    store.clearSemester();
     navigate({ to: "/" });
   };
 
@@ -181,7 +282,7 @@ function ChatPage() {
       activeId={activeId}
       setActiveId={setActiveId}
       newChat={newChat}
-      semester={semester ?? 1}
+      semesterNumber={semesterNumber ?? 1}
       openSemester={openSemesterModal}
       deleteChat={deleteChat}
       logout={logout}
@@ -190,18 +291,14 @@ function ChatPage() {
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
-      {/* Desktop sidebar */}
       <aside className={cn(
         "hidden shrink-0 border-r border-border/70 bg-sidebar transition-all duration-300 md:flex md:flex-col",
         collapsed ? "w-[68px]" : "w-[280px]"
       )}>{sidebar}</aside>
 
-      {/* Main */}
       <main className="flex min-w-0 flex-1 flex-col">
-        {/* Navbar */}
         <header className="flex h-14 items-center justify-between border-b border-border/70 bg-card/60 px-3 backdrop-blur sm:px-4">
           <div className="flex min-w-0 items-center gap-2">
-            {/* Mobile drawer */}
             <Sheet>
               <SheetTrigger asChild>
                 <Button variant="ghost" size="icon" className="md:hidden">
@@ -214,7 +311,7 @@ function ChatPage() {
               </SheetContent>
             </Sheet>
             <Badge variant="secondary" className="rounded-full border border-border/70 bg-card font-medium">
-              <Layers className="mr-1 h-3 w-3" /> Semester {semester}
+              <Layers className="mr-1 h-3 w-3" /> Semester {semesterNumber}
             </Badge>
             <span className="hidden truncate text-sm text-muted-foreground sm:inline">
               {active?.title ?? "New chat"}
@@ -241,21 +338,25 @@ function ChatPage() {
           </DropdownMenu>
         </header>
 
-        {/* Chat area */}
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-[850px] px-4 py-6 sm:px-6">
-            {!active || active.messages.length === 0 ? (
+            {loadingActive ? (
+              <p className="py-20 text-center text-sm text-muted-foreground">Loading...</p>
+            ) : !activeId || messages.length === 0 ? (
               <Welcome onPick={sendMessage} />
             ) : (
-              <ConversationView chat={active} onCopy={(t) => { navigator.clipboard.writeText(t); toast.success("Copied"); }} onRegenerate={() => {
-                const last = [...active.messages].reverse().find(m => m.role === "user");
-                if (last) sendMessage(last.content);
-              }} />
+              <ConversationView
+                messages={messages}
+                onCopy={(t) => { navigator.clipboard.writeText(t); toast.success("Copied"); }}
+                onRegenerate={() => {
+                  const last = [...messages].reverse().find((m) => m.role === "user");
+                  if (last) sendMessage(last.content);
+                }}
+              />
             )}
           </div>
         </div>
 
-        {/* Input */}
         <div className="border-t border-border/70 bg-background/95 px-3 py-3 sm:px-6 sm:py-4">
           <div className="mx-auto w-full max-w-[850px]">
             <Composer onSend={sendMessage} />
@@ -266,7 +367,6 @@ function ChatPage() {
         </div>
       </main>
 
-      {/* Semester modal */}
       <Dialog open={semModalOpen} onOpenChange={setSemModalOpen}>
         <DialogContent className="rounded-3xl sm:max-w-lg">
           <DialogHeader>
@@ -276,20 +376,20 @@ function ChatPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-4 gap-2 py-2">
-            {SEMESTERS.map(({ n }) => (
+            {semesters.map((s) => (
               <button
-                key={n}
-                onClick={() => setPendingSem(n)}
+                key={s.id}
+                onClick={() => setPendingSemId(s.id)}
                 className={cn(
                   "rounded-xl border p-3 text-sm font-medium transition-colors",
-                  pendingSem === n ? "border-primary bg-primary/10 text-primary" : "border-border bg-card hover:bg-accent hover:text-accent-foreground"
+                  pendingSemId === s.id ? "border-primary bg-primary/10 text-primary" : "border-border bg-card hover:bg-accent hover:text-accent-foreground"
                 )}
-              >{n}</button>
+              >{s.number}</button>
             ))}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setSemModalOpen(false)}>Cancel</Button>
-            <Button onClick={confirmSemester} disabled={!pendingSem}>Save</Button>
+            <Button onClick={confirmSemester} disabled={!pendingSemId}>Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -301,15 +401,15 @@ function SidebarContent(props: {
   collapsed: boolean;
   setCollapsed: (v: boolean) => void;
   search: string; setSearch: (v: string) => void;
-  groups: Record<string, Chat[]>;
+  groups: Record<string, ConversationOut[]>;
   activeId: string | null; setActiveId: (id: string | null) => void;
   newChat: () => void;
-  semester: number;
+  semesterNumber: number;
   openSemester: () => void;
   deleteChat: (id: string) => void;
   logout: () => void;
 }) {
-  const { collapsed, setCollapsed, search, setSearch, groups, activeId, setActiveId, newChat, semester, openSemester, deleteChat, logout } = props;
+  const { collapsed, setCollapsed, search, setSearch, groups, activeId, setActiveId, newChat, semesterNumber, openSemester, deleteChat, logout } = props;
 
   return (
     <div className="flex h-full flex-col">
@@ -360,7 +460,7 @@ function SidebarContent(props: {
             <div className="mb-2 rounded-2xl border border-border/70 bg-card p-3">
               <div className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">Current Semester</div>
               <div className="mt-1 flex items-center justify-between">
-                <div className="text-sm font-semibold">Semester {semester}</div>
+                <div className="text-sm font-semibold">Semester {semesterNumber}</div>
                 <Button variant="ghost" size="sm" className="h-7 rounded-lg text-xs" onClick={openSemester}>Change</Button>
               </div>
             </div>
@@ -403,13 +503,13 @@ function Welcome({ onPick }: { onPick: (t: string) => void }) {
   );
 }
 
-function ConversationView({ chat, onCopy, onRegenerate }: { chat: Chat; onCopy: (t: string) => void; onRegenerate: () => void; }) {
+function ConversationView({ messages, onCopy, onRegenerate }: { messages: UIMessage[]; onCopy: (t: string) => void; onRegenerate: () => void; }) {
   const endRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chat.messages.length, chat.messages[chat.messages.length - 1]?.content]);
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages.length, messages[messages.length - 1]?.content]);
 
   return (
     <div className="space-y-6">
-      {chat.messages.map(m => m.role === "user" ? (
+      {messages.map(m => m.role === "user" ? (
         <div key={m.id} className="flex justify-end animate-fade-in">
           <div className="max-w-[85%] rounded-2xl rounded-tr-md bg-primary px-4 py-2.5 text-sm text-primary-foreground shadow-soft">
             {m.content}
@@ -423,12 +523,8 @@ function ConversationView({ chat, onCopy, onRegenerate }: { chat: Chat; onCopy: 
   );
 }
 
-function AssistantMessage({ message, onCopy, onRegenerate }: { message: ChatMessage; onCopy: (t: string) => void; onRegenerate: () => void; }) {
-  const isThinking = message.content === "__thinking__";
-  let payload: { md: string; sources: { file: string; page: number; confidence: number }[]; past: null | { year: string; qNo: string; weight: string } } | null = null;
-  if (!isThinking) {
-    try { payload = JSON.parse(message.content); } catch { payload = { md: message.content, sources: [], past: null }; }
-  }
+function AssistantMessage({ message, onCopy, onRegenerate }: { message: UIMessage; onCopy: (t: string) => void; onRegenerate: () => void; }) {
+  const isThinking = message.thinking && !message.content;
 
   return (
     <Card className="rounded-2xl border-border/70 p-4 shadow-soft animate-fade-in sm:p-5">
@@ -444,38 +540,34 @@ function AssistantMessage({ message, onCopy, onRegenerate }: { message: ChatMess
 
       {isThinking ? <TypingIndicator /> : (
         <>
-          <Markdown>{payload!.md}</Markdown>
+          <Markdown>{message.content}</Markdown>
 
-          {payload!.past && (
+          {message.exam?.commonly_appears && (
             <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-success/30 bg-success/10 px-3 py-1 text-xs font-medium text-success">
               <Sparkles className="h-3 w-3" />
-              Appeared in TU Exam {payload!.past.year} · {payload!.past.qNo} · {payload!.past.weight}
+              Commonly appears · {message.exam.likely_years.join(", ")} · {message.exam.marks} marks
             </div>
           )}
 
-          {payload!.sources.length > 0 && (
+          {message.exam?.exam_tip && (
             <Collapsible className="mt-4">
               <CollapsibleTrigger className="flex w-full items-center justify-between rounded-xl border border-border/70 bg-muted/30 px-3 py-2 text-xs font-medium hover:bg-muted/60">
-                <span>Sources Used ({payload!.sources.length})</span>
+                <span>Exam Tip</span>
                 <ChevronDown className="h-3.5 w-3.5" />
               </CollapsibleTrigger>
-              <CollapsibleContent className="mt-2 space-y-1.5">
-                {payload!.sources.map((s, i) => (
-                  <div key={i} className="flex items-center gap-2 rounded-xl border border-border/70 bg-card px-3 py-2 text-xs">
-                    <FileText className="h-4 w-4 text-primary" />
-                    <span className="flex-1 font-medium">{s.file}</span>
-                    <span className="text-muted-foreground">p. {s.page}</span>
-                    <Badge variant="secondary" className="rounded-full text-[10px]">{Math.round(s.confidence * 100)}% match</Badge>
-                  </div>
-                ))}
+              <CollapsibleContent className="mt-2">
+                <div className="flex items-start gap-2 rounded-xl border border-border/70 bg-card px-3 py-2 text-xs">
+                  <FileText className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                  <span>{message.exam.exam_tip}</span>
+                </div>
               </CollapsibleContent>
             </Collapsible>
           )}
 
-          <PracticeQuestions />
+          {message.practice && <PracticeQuestions practice={message.practice} />}
 
           <div className="mt-4 flex flex-wrap items-center gap-1 border-t border-border/70 pt-3">
-            <IconAction icon={Copy} label="Copy" onClick={() => onCopy(payload!.md)} />
+            <IconAction icon={Copy} label="Copy" onClick={() => onCopy(message.content)} />
             <IconAction icon={ThumbsUp} label="Like" />
             <IconAction icon={ThumbsDown} label="Dislike" />
             <IconAction icon={RotateCcw} label="Regenerate" onClick={onRegenerate} />
@@ -495,34 +587,25 @@ function IconAction({ icon: Icon, label, onClick }: { icon: React.ComponentType<
   );
 }
 
-function PracticeQuestions() {
+function PracticeQuestions({ practice }: { practice: PracticeProblems }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="mt-4 rounded-2xl border border-dashed border-border/70 p-3">
       <button onClick={() => setOpen(!open)} className="flex w-full items-center justify-between text-sm font-medium">
-        <span className="inline-flex items-center gap-2"><Sparkles className="h-4 w-4 text-primary" /> Generate Practice Questions</span>
+        <span className="inline-flex items-center gap-2"><Sparkles className="h-4 w-4 text-primary" /> Practice Questions</span>
         <ChevronDown className={cn("h-4 w-4 transition-transform", open && "rotate-180")} />
       </button>
       {open && (
-        <div className="mt-3 space-y-3 text-sm animate-fade-in">
+        <div className="mt-3 space-y-4 text-sm animate-fade-in">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">MCQs</div>
-            <ol className="mt-1 ml-5 list-decimal space-y-1">
-              <li>Which normal form removes transitive dependency? <span className="text-muted-foreground">(3NF)</span></li>
-              <li>Which condition is NOT a Coffman condition? <span className="text-muted-foreground">(Round robin)</span></li>
-            </ol>
+            <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Question 1</div>
+            <p className="mt-1">{practice.problem_one}</p>
+            <p className="mt-1 text-muted-foreground"><span className="font-medium text-foreground">Answer:</span> {practice.answer_one}</p>
           </div>
           <div>
-            <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Subjective</div>
-            <ul className="mt-1 ml-5 list-disc space-y-1">
-              <li>Explain the differences between 3NF and BCNF with an example.</li>
-            </ul>
-          </div>
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Long Question</div>
-            <ul className="mt-1 ml-5 list-disc space-y-1">
-              <li>Discuss deadlock detection and recovery techniques in modern OS. (10 marks)</li>
-            </ul>
+            <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Question 2</div>
+            <p className="mt-1">{practice.problem_two}</p>
+            <p className="mt-1 text-muted-foreground"><span className="font-medium text-foreground">Answer:</span> {practice.answer_two}</p>
           </div>
         </div>
       )}
@@ -556,8 +639,8 @@ function Composer({ onSend }: { onSend: (text: string) => void }) {
     <div className="relative rounded-3xl border border-border/70 bg-card p-2 shadow-soft focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/15">
       <Textarea
         value={value}
-        onChange={e => setValue(e.target.value)}
-        onKeyDown={e => {
+        onChange={(e: { target: { value: SetStateAction<string>; }; }) => setValue(e.target.value)}
+        onKeyDown={(e: { key: string; shiftKey: any; preventDefault: () => void; }) => {
           if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
         }}
         placeholder="Ask anything about your CSIT course..."
