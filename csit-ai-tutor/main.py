@@ -24,7 +24,6 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
-app.include_router(auth_router)
 app.include_router(semester_router)
 app.include_router(conversations_router)
 
