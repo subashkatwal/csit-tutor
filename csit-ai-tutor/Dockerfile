@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python deps first (separate layer = faster rebuilds when only code changes)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --default-timeout=120 --retries=5 -r requirements.txt
 
 # Copy the rest of the app
 COPY . .

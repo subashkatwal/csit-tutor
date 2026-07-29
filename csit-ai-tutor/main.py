@@ -1,5 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from routes.auth_routes import router as auth_router
+from routes.semester_routes import router as semester_router
+from routes.conversations import router as conversations_router
 
 from database import Base, engine
 import models  # noqa: F401  (import so SQLAlchemy registers the model before create_all)
@@ -21,6 +24,9 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(auth_router)
+app.include_router(semester_router)
+app.include_router(conversations_router)
 
 
 @app.get("/")
