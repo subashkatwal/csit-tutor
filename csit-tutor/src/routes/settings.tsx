@@ -9,7 +9,8 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Logo } from "@/components/Logo";
-import { store, applyTheme, SEMESTERS } from "@/lib/store";
+import { store, applyTheme } from "@/lib/store";
+import { listSemesters, selectSemester, type Semester } from "@/api/semesters";
 import { ChevronLeft } from "lucide-react";
 import { toast } from "sonner";
 
@@ -29,29 +30,52 @@ function SettingsPage() {
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [semester, setSemester] = useState<number>(1);
+  const [semesters, setSemesters] = useState<Semester[]>([]);
+  const [semesterId, setSemesterId] = useState<string>("");
   const [theme, setTheme] = useState<"light" | "dark" | "system">("system");
   const [notifications, setNotifications] = useState(true);
   const [language, setLanguage] = useState("en");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const u = store.getUser();
     if (!u) { navigate({ to: "/login" }); return; }
     setName(u.name); setEmail(u.email);
-    setSemester(store.getSemester() ?? 1);
+    setSemesterId(store.getSemesterId() ?? "");
     setTheme(store.getTheme());
+
+    listSemesters()
+      .then(setSemesters)
+      .catch(() => toast.error("Couldn't load semesters"));
   }, [navigate]);
 
-  const save = () => {
-    store.setUser({ name, email });
-    const previous = store.getSemester();
-    store.setSemester(semester);
-    store.setTheme(theme);
-    applyTheme(theme);
-    if (previous && previous !== semester) {
-      toast.success("Saved. Semester changed- a fresh chat will start.");
-    } else {
-      toast.success("Settings saved");
+  const save = async () => {
+    try {
+      setSaving(true);
+      store.setUser({ name, email });
+
+      const previousSemesterId = store.getSemesterId();
+      if (semesterId && semesterId !== previousSemesterId) {
+        const semester = semesters.find((s) => s.id === semesterId);
+        if (semester) {
+          await selectSemester(semester.id);
+          store.setSemester(semester.number);
+          store.setSemesterId(semester.id);
+        }
+      }
+
+      store.setTheme(theme);
+      applyTheme(theme);
+
+      if (previousSemesterId && previousSemesterId !== semesterId) {
+        toast.success("Saved. Semester changed- a fresh chat will start.");
+      } else {
+        toast.success("Settings saved");
+      }
+    } catch {
+      toast.error("Couldn't save your changes");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -80,18 +104,18 @@ function SettingsPage() {
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="email">Email</Label>
-                <Input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} />
+                <Input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} disabled />
               </div>
             </div>
           </Section>
 
           <Section title="Semester" description="Changing semester loads a different knowledge base and starts a fresh chat.">
             <div className="max-w-xs">
-              <Select value={String(semester)} onValueChange={v => setSemester(Number(v))}>
+              <Select value={semesterId} onValueChange={setSemesterId}>
                 <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {SEMESTERS.map(({ n }) => (
-                    <SelectItem key={n} value={String(n)}>Semester {n}</SelectItem>
+                  {semesters.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>Semester {s.number}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -129,7 +153,9 @@ function SettingsPage() {
           </Section>
 
           <div className="flex justify-end">
-            <Button onClick={save} className="rounded-2xl px-6">Save changes</Button>
+            <Button onClick={save} disabled={saving} className="rounded-2xl px-6">
+              {saving ? "Saving..." : "Save changes"}
+            </Button>
           </div>
         </div>
       </div>
